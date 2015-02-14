@@ -1,5 +1,7 @@
 # Fast sampling from truncated normal distributions
 
+using Distributions
+
 include("randtn_zigtables.jl")
 
 const log2π = 1.83787706641
@@ -7,45 +9,53 @@ const tnzig_kmin = 5
 
 # returns sample x ~ N(0,1) truncated at [a,b], using rejection sampling with
 # a truncated exponential proposal
-function randtn_truncexp(a, b)
+function randtn_truncexp(a::Real, b::Real)
     twoasq = 2abs2(a)
     c = exp(-a*(b - a)) - 1
     while true
         z = log(1 + c * rand())
-        (-twoasq * log(rand()) > abs2(z)) && return a - z/a        
+        if -twoasq * log(rand()) > abs2(z)
+            return a - z/a
+        end
     end
 end
 
 # returns sample x ~ N(0,1) truncated at [a,b], using rejection sampling with
 # a standard normal proposal
-function randtn_norm(a, b)
+function randtn_norm(a::Real, b::Real)
     while true
         z = randn()
-        (z >= a && z <= b) && return z
+        if z >= a && z <= b
+            return z
+        end
     end
 end
 
 
 # returns sample x ~ N(0,1) truncated at [a,b], assuming b > a and |a| < |b|.
-function randtnstd(a::Real, b::Real)
-    const N = length(tnzig_x) - 1
-    @assert N == length(tnzig_yl) == length(tnzig_yu) == length(tnzig_d) == length(tnzig_delta)
-    
-    # a in left tail implies b > -a, use normal proposal
-    a < tnzig_xmin && return randtn_norm(a, b)
+function randtnstd(a::Real, b::Real, tp::Real)
+    # a in left tail, or large mass, implies b > -a, use normal proposal
+    if a < tnzig_xmin || tp > 0.3
+        return randtn_norm(a, b)
+    end
 
     # a in right tail implies b > a, use truncated exponential proposal
-    a > tnzig_xmax && return randtn_truncexp(a, b)
+    if a > tnzig_xmax
+        return randtn_truncexp(a, b)
+    end
 
     # tnzig_xmin <= a <= tnzig_xmax, use Chopin's algorithm
+    N = length(tnzig_x) - 1
     # a in interval ka or ka+1
     ka = tnzig_ncell[tnzig_i0 + ifloor(a * tnzig_invh)]  
-    kb = b < tnzig_xmax ?                         # b in interval kb-1 or kb
+    kb = b < tnzig_xmax ?               # b in interval kb-1 or kb
         min(tnzig_ncell[tnzig_i0 + floor(b * tnzig_invh)] + 1, N) :
         N + 1                                     # b in right tail
 
     # for small kb - ka use rejection sampling with truncated exponential prop.
-    abs(kb - ka) < tnzig_kmin && return randtn_truncexp(a, b)
+    if abs(kb - ka) < tnzig_kmin
+        return randtn_truncexp(a, b)
+    end
 
     while true
         # sample integer k from range [ka, kb]
@@ -55,14 +65,17 @@ function randtnstd(a::Real, b::Real)
             # right tail, rejection sampling with truncated exponential proposal
             xN1 = tnzig_x[end]
             z = -log(rand()) / xN1
-            (abs2(z) < -2log(rand()) && z < b - xN1) && return xN1 + z
+            if abs2(z) < -2log(rand()) && z < b - xN1
+                return xN1 + z
+            end
 
         elseif k > ka + 1 && (k < kb - 1 || b >= tnzig_xmax)
             # all other intervals, away from boundaries
             u = rand()
             simy = tnzig_yu[k] * u;
             if simy < tnzig_yl[k]
-                return tnzig_x[k] + u * tnzig_delta[k]  # happens most of the time
+                # happens most of the time
+                return tnzig_x[k] + u * tnzig_delta[k]
             end
             # check if we are below the pdf curve
             sim = tnzig_x[k] + tnzig_d[k] * rand()
@@ -84,8 +97,12 @@ function randtnstd(a::Real, b::Real)
 end
 
 
-# returns sample x ~ N(0,1) truncated at [a,b], assuming b > a
-randtn(a::Real, b::Real) = abs(a) > abs(b) ? -randtnstd(-b, -a) : randtnstd(a, b)
-
-# returns sample x ~ N(μ,σ) truncated at [a,b], assuming b > a
-randtn(μ::Real, σ::Real, a::Real, b::Real) = σ * randtn((a - μ) / σ, (b - μ) / σ) + μ
+function randtn(d::Truncated{Normal})
+    d0 = d.untruncated
+    μ = mean(d0)
+    σ = std(d0)
+    a = (d.lower - μ) / σ
+    b = (d.upper - μ) / σ
+    z = abs(a) > abs(b) ? -randtnstd(-b, -a, d.tp) : randtnstd(a, b, d.tp)
+    return μ + σ * z
+end
