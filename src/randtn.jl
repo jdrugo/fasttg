@@ -33,7 +33,7 @@ end
 
 
 # returns sample x ~ N(0,1) truncated at [a,b], assuming b > a and |a| < |b|.
-function randtnstd(a::Real, b::Real, tp::Real)
+function randtnstdord(a::Real, b::Real, tp::Real)
     # a in left tail, or large mass, implies b > -a, use normal proposal
     if a < tnzig_xmin || tp > 0.3
         return randtn_norm(a, b)
@@ -95,6 +95,10 @@ function randtnstd(a::Real, b::Real, tp::Real)
         end
     end
 end
+# same as randtnstdord, but does not require |a| < |b|
+randtnstd(a::Real, b::Real, tp::Real) = abs(a) > abs(b) ? 
+                                        -randtnstdord(-b, -a, tp) : 
+                                        randtnstdord(a, b, tp)
 
 
 function randtn(d::Truncated{Normal})
@@ -103,6 +107,6 @@ function randtn(d::Truncated{Normal})
     σ = std(d0)
     a = (d.lower - μ) / σ
     b = (d.upper - μ) / σ
-    z = abs(a) > abs(b) ? -randtnstd(-b, -a, d.tp) : randtnstd(a, b, d.tp)
+    z = abs(a) > abs(b) ? -randtnstdord(-b, -a, d.tp) : randtnstdord(a, b, d.tp)
     return μ + σ * z
 end

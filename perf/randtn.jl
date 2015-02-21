@@ -13,11 +13,30 @@ end
 include("../src/randtn.jl")
 include("../src/randtn_other.jl")
 
-function randtime(f::Function, d::Distribution, n::Int)
-    f(d)
+# helper functions for each algorithm
+immutable RandTNChopin; end
+immutable RandTNRobert; end
+immutable RandTNInvCDF; end
+const randfuntypes = [RandTNChopin(), RandTNRobert(), RandTNInvCDF()]
+
+randfun(::RandTNChopin) = randtnstd
+randfunargs(::RandTNChopin, d::Distribution) = (d.lower, d.upper, d.tp)
+randfunid(::RandTNChopin) = :chopin
+
+randfun(::RandTNRobert) = randtn_robert_base
+randfunargs(::RandTNRobert, d::Distribution) = (d.lower, d.upper, d.tp)
+randfunid(::RandTNRobert) = :robert
+
+randfun(::RandTNInvCDF) = randtn_invcdf
+randfunargs(::RandTNInvCDF, d::Distribution) = (d, )
+randfunid(::RandTNInvCDF) = :invcdf
+
+# timer
+function randtime(f::Function, args, n::Int)
+    f(args...)
     gc_disable()
     t = @elapsed for i = 1:n
-        f(d)
+        f(args...)
     end
     gc_enable()
     gc()
@@ -41,14 +60,15 @@ for i = 1:length(bs)
     as = linspace(amin, min(b - 0.01, amax), anum)
     df = DataFrame([Float64, Float64, Symbol], [:a, :t, :algo], anum * length(testfns))
     for j = 1:length(testfns)
-        testfn = testfns[j]
-        testid = testids[j]
+        randfuntype = randfuntypes[j]
+        testfn = randfun(randfuntype)
+        testid = randfunid(randfuntype)
         print("Testing ", string(testid))
         for k = 1:anum
             d = TruncatedNormal(0, 1, as[k], b)
             l = (j-1) * anum + k
             df[l, :a] = as[k]
-            df[l, :t] = randtime(testfn, d, nsamples)
+            df[l, :t] = randtime(testfn, randfunargs(randfuntype, d), nsamples)
             df[l, :algo] = testid
         end
         println(", <t> = ", mean(df[((j-1)*anum+1):(j*anum), :t]))
